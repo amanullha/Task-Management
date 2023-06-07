@@ -13,6 +13,24 @@ exports.getAllUsers = async () => {
     const users = await UserModel.find().lean();;
     return users;
 }
+exports.getOneUser = async (userId) => {
+    try {
+        if (userId) {
+            const user = await UserModel.findById(userId);
+            if (!user) {
+                throw new Error('User not found');
+            }
+            return user;
+        }
+        else {
+            throw new Error("invalid userId");
+        }
+    } catch (error) {
+        throw new Error('Failed to get user: ' + error.message);
+    }
+}
+
+
 
 exports.createUserServices = async (data) => {
     const userObj = await constructUserObject(data);
@@ -22,7 +40,7 @@ exports.createUserServices = async (data) => {
 }
 exports.replaceToken = async (token) => {
     const user = await verifyUser(token);
-    const tokens = await generateTokens({ email: user.email, name: user.name });
+    const tokens = await generateTokens({ email: user.email, name: user.name, _id: user?._id });
     if (user) {
         return {
             user: user,
@@ -40,7 +58,7 @@ exports.loginUserServices = async (data) => {
         if (isMatch) {
             return {
                 user: user,
-                tokens: await generateTokens({ email: user.email, name: user.name })
+                tokens: await generateTokens({ email: user.email, name: user.name, _id: user?._id })
             };
         }
 
@@ -63,6 +81,7 @@ async function constructReturnUserObject(data) {
     let user = {
         name: data.name ?? '',
         email: data.email ?? '',
+        _id: data._id ?? "",
     }
     let tokens = generateTokens(user)
     return {

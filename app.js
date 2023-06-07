@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors');
 const mongoose = require('mongoose');
 const userRoute = require('./routes/v1/user.route')
+const taskRoute = require('./routes/v1/task.route')
 const app = express();
 const bodyParser = require('body-parser');
 
@@ -30,6 +31,7 @@ app.get('/', (req, res) => {
 
 // Data Routes
 app.use("/api/v1/user", userRoute)
+app.use("/api/v1/task", taskRoute)
 
 
 
