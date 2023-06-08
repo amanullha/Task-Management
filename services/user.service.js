@@ -53,7 +53,7 @@ exports.replaceToken = async (token) => {
 exports.loginUserServices = async (data) => {
     const email = data.email;
     const user = await UserModel.findOne({ email: email }).lean();
-    if (user._id) {
+    if (user?._id) {
         const pass = user.password;
         const isMatch = await checkPassword(data.password, pass);
         if (isMatch) {
