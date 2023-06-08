@@ -16,7 +16,8 @@ exports.getAllUsers = async () => {
 exports.getOneUser = async (userId) => {
     try {
         if (userId) {
-            const user = await UserModel.findById(userId);
+            const res = await UserModel.findById(userId).exec();
+            const user = await res.toObject();
             if (!user) {
                 throw new Error('User not found');
             }

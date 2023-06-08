@@ -14,9 +14,22 @@ const TaskSchema = mongoose.Schema({
         type: String,
         required: true
     },
+    // dueDate: {
+    //     type: Date,
+    //     required: true
+    // },
     dueDate: {
         type: Date,
-        required: true
+        get: function (value) {
+            // Convert the date to browser local time format
+            const localDate = value.toLocaleString();
+            return localDate;
+        },
+        set: function (value) {
+            // Parse the local date
+            const parsedDate = new Date(value);
+            return parsedDate;
+        }
     },
     status: {
         type: String,

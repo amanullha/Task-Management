@@ -8,31 +8,44 @@ const { getOneUser } = require('../services/user.service')
 async function createTask(data, user) {
     try {
         const taskObj = await constructTaskObject(data, user);
-        const newTask = await TaskModel.create(taskObj);
+        const res = await TaskModel.create(taskObj);
+        const newTask = await res.toObject();
         if (newTask) {
             const assignee = await addAssigneeToTask(newTask._id, user._id)
         }
         return newTask;
     } catch (error) {
-        throw new Error('Failed to create task');
+        throw new Error(error?.message);
     }
 }
+
 async function addAssigneeToTask(taskId, userId) {
     const task = await getTaskById(taskId);
     const user = await getOneUser(userId);
     if (user && task) {
         let assigneeObj = {
-            taskId: String(taskId) ?? '',
-            assignedIds: [String(userId)]
+            taskId: taskId ?? '',
+            assignedIds: [userId]
         }
-        const existTask = await TaskAssigneeModel.find({ taskId: taskId });
+        const data = await TaskAssigneeModel.find({ taskId: taskId }).lean();
+        const existTask = data.length > 0 ? data[0] : {};
         let updatedAssigneeList;
         if (existTask?._id) {
-            assigneeObj.assignedIds = [...new Set(...existTask.assignedIds, String(userId))];
-            updatedAssigneeList = await TaskAssigneeModel.findByIdAndUpdate({ taskId: String(taskId) }, assigneeObj)
+            // const existingIds = existTask.assignedIds
+            // let allIds=[userId];
+            // for(let i=0;i<existingIds?.length;i++){
+            //     allIds.push(existingIds[i]);
+            // }
+            existTask.assignedIds.push(userId)
+            const uniqueIds = [...new Set(existTask.assignedIds)];
+            updatedAssigneeList = await TaskAssigneeModel.updateMany(
+                { taskId: taskId },
+                { $set: { assignedIds: uniqueIds } }
+            );
         }
         else {
-            updatedAssigneeList = await TaskAssigneeModel.create(assigneeObj);
+            const res = await TaskAssigneeModel.create(assigneeObj);
+            updatedAssigneeList = await res.toObject();
         }
         return updatedAssigneeList;
 
@@ -41,6 +54,91 @@ async function addAssigneeToTask(taskId, userId) {
         throw new Error('Failed to add new assignee');
     }
 }
+async function deleteAssigneeFromTask(taskId, userId) {
+    const task = await getTaskById(taskId);
+    const user = await getOneUser(userId);
+    if (user && task) {
+        let assigneeObj = {
+            taskId: taskId ?? '',
+            assignedIds: [userId]
+        }
+        const data = await TaskAssigneeModel.find({ taskId: taskId }).lean();
+        const existTask = data.length > 0 ? data[0] : {};
+        let updatedAssigneeList;
+        if (existTask?._id) {
+            let uniqueIds = existTask.assignedIds.filter(id => id !== userId);
+            updatedAssigneeList = await TaskAssigneeModel.updateMany(
+                { taskId: taskId },
+                { $set: { assignedIds: uniqueIds } }
+            );
+        }
+        else {
+            const res = await TaskAssigneeModel.create(assigneeObj);
+            updatedAssigneeList = await res.toObject();
+        }
+        return updatedAssigneeList;
+
+
+    } else {
+        throw new Error('Failed to add new assignee');
+    }
+}
+async function getTasks(queries, search) {
+    try {
+        const { dueDate, status, assignedUser, sortBy } = queries;
+        const query = {};
+        if (dueDate) {
+            query.dueDate = dueDate;
+        }
+        if (status) {
+            query.status = status;
+        }
+
+        if (assignedUser) {
+            const taskIds = await getUserAssignTasks(assignedUser)
+            query._id = { $in: taskIds };
+        }
+
+        if (search) {
+            query.title = { $regex: search, $options: 'i' };
+        }
+
+        // Build the sort object based on the sortBy parameter
+        let sort = {};
+
+        if (sortBy === 'dueDate') {
+            sort = { dueDate: 1 };
+        } else if (sortBy === 'createdAt') {
+            sort = { createdAt: 1 };
+        }
+        else if (sortBy === 'updatedAt') {
+            sort = { updatedAt: 1 };
+        }
+
+        let data = await TaskModel.find(query)
+            .sort(sort)
+            .maxTimeMS(20000)
+        let tasks = [];
+        for (let i = 0; i < data?.length; i++) {
+            let task = data[i].toObject();
+            task['assignedIds'] = await getAssigneeIdsOfTask(task._id);
+            tasks.push(task);
+        }
+        return tasks;
+    } catch (error) {
+        console.error(error);
+        return error.message;
+    }
+}
+async function getUserAssignTasks(userId) {
+    const query = {
+        assignedIds: userId
+    };
+    const tasks = await TaskModel.find(query).select('_id');
+    const taskIds = tasks.map(task => task._id.toString());
+    return taskIds;
+}
+
 async function constructTaskObject(data, user) {
     const dueDate = new Date(data?.dueDate);
     const task = {
@@ -58,7 +156,7 @@ async function constructUpdateTaskObject(newData, oldData) {
         title: newData.title ?? oldData.title,
         description: newData.description ?? oldData.description,
         dueDate: dueDate ?? oldData.dueDate,
-        status: newDate.status ?? oldData.status,
+        status: newData.status ?? oldData.status,
     }
     return task;
 }
@@ -66,14 +164,14 @@ async function constructUpdateTaskObject(newData, oldData) {
 // Update an existing task
 async function updateTask(taskId, data) {
     try {
-        const existAssignedTask = await TaskModel.findById(taskId);
+        const existAssignedTask = await TaskModel.findById(taskId).lean().exec();
         if (existAssignedTask) {
-            const updateObj = constructUpdateTaskObject(data, existAssignedTask)
+            const updateObj = await constructUpdateTaskObject(data, existAssignedTask)
             const updatedTask = await TaskModel.findByIdAndUpdate(
                 taskId,
                 updateObj,
                 { new: true }
-            );
+            ).lean().exec();
 
             if (!updatedTask) {
                 throw new Error('Task not found');
@@ -102,54 +200,36 @@ async function deleteTask(taskId) {
     }
 }
 
-// Assign a task to a user
-async function assignTask(taskId, assignedUserId) {
-    try {
-        const existAssignedTask = await TaskModel.findById(taskId);
-        if (existAssignedTask) {
-            const updateObj = constructTaskObject(existAssignedTask)
-            const updatedTask = await Task.findByIdAndUpdate(
-                taskId,
-                updateObj,
-                { new: true }
-            );
-
-            if (!updatedTask) {
-                throw new Error('Task not found');
-            }
-
-            return updatedTask;
-        }
-        else {
-            throw new Error('Task not found');
-        }
-
-    } catch (error) {
-        throw new Error('Failed to assign task');
-    }
-}
 
 // Get the assignment status of a task
-async function getAssignmentStatus(taskId) {
+async function getTaskStatus(taskId) {
     try {
-        const task = await Task.findById(taskId);
+        const task = await getTaskById(taskId);
 
         if (!task) {
             throw new Error('Task not found');
         }
 
-        return task.assignedTo ? 'Assigned' : 'Unassigned';
+        return task?.status;
     } catch (error) {
         throw new Error('Failed to get assignment status');
     }
 }
+
+async function getAssigneeIdsOfTask(taskId) {
+    const assigneeTasks = await TaskAssigneeModel.find({ taskId: taskId.toString() }).lean().exec();
+    if (assigneeTasks?.length > 0) return assigneeTasks[0]?.assignedIds;
+    else return [];
+}
 async function getTaskById(taskId) {
     try {
         if (taskId) {
-            const task = await TaskModel.findById(taskId);
+            let task = await TaskModel.findById(taskId).lean().exec();
             if (!task) {
                 throw new Error('Task not found');
             }
+            const assignedIds = await getAssigneeIdsOfTask(task?._id.toString())
+            task['assignedIds'] = assignedIds;
             return task;
         }
         else {
@@ -163,7 +243,10 @@ async function getTaskById(taskId) {
 module.exports = {
     createTask,
     updateTask,
+    getTaskById,
+    getTaskStatus,
     deleteTask,
-    assignTask,
-    getAssignmentStatus
+    addAssigneeToTask,
+    getTasks,
+    deleteAssigneeFromTask
 };

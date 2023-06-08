@@ -9,13 +9,12 @@ const TaskAssigneeSchema = new mongoose.Schema({
     ref: "Task",
     required: true,
   },
-  assignedIds: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-  ],
+  assignedIds: {
+    // type: mongoose.Schema.Types.ObjectId,
+    // ref: "User",
+    type: [String],
+    required: true,
+  },
 });
 
 // Create the TaskAssignee model
